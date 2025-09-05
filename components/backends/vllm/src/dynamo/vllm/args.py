@@ -12,15 +12,7 @@ from vllm.distributed.kv_events import KVEventsConfig
 from vllm.engine.arg_utils import AsyncEngineArgs
 from vllm.utils import FlexibleArgumentParser
 
-# Import with fallbacks for compatibility
-try:
-    from dynamo._core import get_reasoning_parser_names, get_tool_parser_names
-except ImportError:
-    # Provide fallback functions if not available
-    def get_reasoning_parser_names():
-        return []
-    def get_tool_parser_names():
-        return []
+from dynamo._core import get_reasoning_parser_names, get_tool_parser_names
 
 from . import __version__
 from .ports import (
@@ -75,11 +67,7 @@ class Config:
 
 
 def update_vllm_args_with_extra_options(engine_args: AsyncEngineArgs, extra_args_path: str) -> AsyncEngineArgs:
-    """Load extra engine arguments from YAML file and apply them to vLLM engine args.
-    
-    This function mimics the behavior of TRT-LLM's update_llm_args_with_extra_options
-    to provide consistent configuration interface between backends.
-    """
+    """Load extra engine arguments from YAML file and apply them to vLLM engine args."""
     if not extra_args_path or not os.path.exists(extra_args_path):
         logger.warning(f"Extra engine args file not found: {extra_args_path}")
         return engine_args
@@ -94,7 +82,7 @@ def update_vllm_args_with_extra_options(engine_args: AsyncEngineArgs, extra_args
             
         logger.info(f"Loading extra engine args from {extra_args_path}: {extra_config}")
         
-        # Handle speculative_config specifically
+        # Handle speculative_config
         if "speculative_config" in extra_config:
             spec_config = extra_config["speculative_config"]
             vllm_spec_config = convert_trtllm_speculative_config_to_vllm(spec_config)
@@ -103,7 +91,7 @@ def update_vllm_args_with_extra_options(engine_args: AsyncEngineArgs, extra_args
                 engine_args.speculative_config = vllm_spec_config
                 logger.info(f"Applied speculative config: {vllm_spec_config}")
         
-        # Handle other configs that can be directly mapped
+        # Handle parameter mappings
         direct_mappings = {
             "max_batch_size": "max_num_seqs",
             "max_num_tokens": "max_num_batched_tokens", 
@@ -133,25 +121,15 @@ def update_vllm_args_with_extra_options(engine_args: AsyncEngineArgs, extra_args
 
 
 def convert_trtllm_speculative_config_to_vllm(trtllm_config: dict) -> Optional[dict]:
-    """Convert TRT-LLM speculative_config format to vLLM format.
-    
-    TRT-LLM format examples:
-    - Eagle: {"decoding_type": "Eagle", "max_draft_len": 3, "speculative_model_dir": "model_path", "eagle3_one_model": true}
-    - MTP: {"decoding_type": "MTP", "num_nextn_predict_layers": 1}
-    
-    vLLM format examples:
-    - Draft model: {"speculative_model": "model_path", "num_speculative_tokens": 5}
-    - N-gram: {"speculative_model": "[ngram]", "num_speculative_tokens": 5, "ngram_prompt_lookup_max": 4}
-    """
+    """Convert TRT-LLM speculative_config format to vLLM format."""
     if not trtllm_config:
         return None
     
     decoding_type = trtllm_config.get("decoding_type", "").lower()
     
     if decoding_type == "eagle":
-        # Map Eagle speculative decoding to vLLM format
         vllm_config = {
-            "method": "draft_model"  # Required for Eagle
+            "method": "draft_model"
         }
         
         if "speculative_model_dir" in trtllm_config:
@@ -160,7 +138,6 @@ def convert_trtllm_speculative_config_to_vllm(trtllm_config: dict) -> Optional[d
         if "max_draft_len" in trtllm_config:
             vllm_config["num_speculative_tokens"] = trtllm_config["max_draft_len"]
         
-        # Set reasonable defaults if not specified
         if "num_speculative_tokens" not in vllm_config:
             vllm_config["num_speculative_tokens"] = 5
             
@@ -168,12 +145,10 @@ def convert_trtllm_speculative_config_to_vllm(trtllm_config: dict) -> Optional[d
         return vllm_config
         
     elif decoding_type == "mtp":
-        # MTP (Multi-Token Prediction) doesn't have a direct vLLM equivalent
-        # We'll use n-gram lookup as the closest alternative
         vllm_config = {
             "method": "ngram",
             "model": "[ngram]",
-            "num_speculative_tokens": trtllm_config.get("num_nextn_predict_layers", 1) * 2,  # Rough approximation
+            "num_speculative_tokens": trtllm_config.get("num_nextn_predict_layers", 1) * 2,
             "prompt_lookup_max": 4,
             "prompt_lookup_min": 1
         }
@@ -464,7 +439,6 @@ def create_kv_transfer_config(config: Config) -> Optional[KVTransferConfig]:
 
 def overwrite_args(config):
     """Set vLLM defaults for Dynamo."""
-    # First apply extra engine args from YAML file if provided
     if config.extra_engine_args:
         logger.info(f"Processing extra engine args from: {config.extra_engine_args}")
         config.engine_args = update_vllm_args_with_extra_options(config.engine_args, config.extra_engine_args)
